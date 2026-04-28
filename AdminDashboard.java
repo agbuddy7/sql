@@ -55,6 +55,11 @@ public class AdminDashboard extends JFrame {
         uploadCollegesBtn.setBackground(new Color(200, 100, 50));
         uploadCollegesBtn.setForeground(Color.WHITE);
         uploadCollegesBtn.addActionListener(e -> openCollegesManager());
+        
+        JButton uploadCentersBtn = new JButton("Manage Centers");
+        uploadCentersBtn.setBackground(new Color(100, 150, 50));
+        uploadCentersBtn.setForeground(Color.WHITE);
+        uploadCentersBtn.addActionListener(e -> openCentersManager());
 
         JButton resetBtn = new JButton("Master Reset");
         resetBtn.setBackground(new Color(220, 20, 60));
@@ -70,6 +75,7 @@ public class AdminDashboard extends JFrame {
         bottomPanel.setLayout(new FlowLayout());
         bottomPanel.add(refreshBtn);
         bottomPanel.add(uploadCollegesBtn);
+        bottomPanel.add(uploadCentersBtn);
         bottomPanel.add(uploadQuestionBtn);
         bottomPanel.add(bulkStudentsBtn);
         bottomPanel.add(releaseResultsBtn);
@@ -366,6 +372,120 @@ public class AdminDashboard extends JFrame {
                     JOptionPane.showMessageDialog(dialog, "Total Questions in Bank: " + rs.getInt("count"));
                 }
             } catch(Exception ex) {}
+        });
+
+        dialog.setLocationRelativeTo(this);
+        dialog.setVisible(true);
+    }
+
+    private void openCentersManager() {
+        JDialog dialog = new JDialog(this, "Manage Exam Centers", true);
+        dialog.setSize(400, 250);
+        dialog.setLayout(new GridLayout(5, 2, 5, 5));
+        
+        dialog.add(new JLabel(" City Name:"));
+        JTextField txtCity = new JTextField();
+        dialog.add(txtCity);
+        
+        dialog.add(new JLabel(" Total Capacity:"));
+        JTextField txtCapacity = new JTextField();
+        dialog.add(txtCapacity);
+
+        JButton btnSave = new JButton("Save Single Center");
+        btnSave.setBackground(new Color(0, 150, 0));
+        btnSave.setForeground(Color.WHITE);
+        dialog.add(new JLabel(" — OR —")); 
+        dialog.add(btnSave);
+
+        JButton btnUploadCSV = new JButton("Upload CSV File");
+        btnUploadCSV.setBackground(new Color(50, 100, 200));
+        btnUploadCSV.setForeground(Color.WHITE);
+        dialog.add(new JLabel(" Bulk Upload Centers:"));
+        dialog.add(btnUploadCSV);
+
+        JButton btnView = new JButton("View Centers Count");
+        dialog.add(new JLabel(" Data Status:"));
+        dialog.add(btnView);
+
+        btnSave.addActionListener(e -> {
+            try (Connection conn = DriverManager.getConnection(DB_URL, USER, PASS);
+                 PreparedStatement pstmt = conn.prepareStatement("INSERT INTO Center (city_name, total_seats, available_seats) VALUES (?, ?, ?)")) {
+                pstmt.setString(1, txtCity.getText());
+                int capacity = Integer.parseInt(txtCapacity.getText());
+                pstmt.setInt(2, capacity);
+                pstmt.setInt(3, capacity);
+                pstmt.executeUpdate();
+                
+                JOptionPane.showMessageDialog(dialog, "Center successfully added!");
+                txtCity.setText(""); txtCapacity.setText("");
+            } catch (SQLException ex) {
+                JOptionPane.showMessageDialog(dialog, "Database Error: " + ex.getMessage());
+            } catch (NumberFormatException ex) {
+                JOptionPane.showMessageDialog(dialog, "Capacity must be a number!");
+            }
+        });
+
+        btnUploadCSV.addActionListener(e -> {
+            JFileChooser fileChooser = new JFileChooser();
+            fileChooser.setDialogTitle("Select a Centers CSV file (City, Capacity)");
+            fileChooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter("CSV Files", "csv"));
+            
+            if (fileChooser.showOpenDialog(dialog) == JFileChooser.APPROVE_OPTION) {
+                java.io.File file = fileChooser.getSelectedFile();
+                int successCount = 0;
+                int failCount = 0;
+                boolean isFirstLine = true;
+                
+                try (java.io.BufferedReader br = new java.io.BufferedReader(new java.io.FileReader(file));
+                     Connection conn = DriverManager.getConnection(DB_URL, USER, PASS);
+                     PreparedStatement pstmt = conn.prepareStatement("INSERT INTO Center (city_name, total_seats, available_seats) VALUES (?, ?, ?)")) {
+                    
+                    String line;
+                    while ((line = br.readLine()) != null) {
+                        try {
+                            String[] data = line.split(",(?=([^\"]*\"[^\"]*\")*[^\"]*$)");
+                            
+                            if (data.length < 2) {
+                                failCount++;
+                                continue;
+                            }
+                            
+                            for (int i=0; i<data.length; i++) {
+                                data[i] = data[i].trim().replaceAll("^\"|\"$", "");
+                            }
+
+                            if (isFirstLine && (data[0].toLowerCase().contains("city") || data[0].toLowerCase().contains("center"))) {
+                                isFirstLine = false;
+                                continue;
+                            }
+                            isFirstLine = false;
+
+                            pstmt.setString(1, data[0]); // City Name
+                            int capacity = Integer.parseInt(data[1]);
+                            pstmt.setInt(2, capacity);   // Total Seats
+                            pstmt.setInt(3, capacity);   // Available Seats
+                            pstmt.executeUpdate();
+                            successCount++;
+
+                        } catch (Exception parseEx) {
+                            failCount++;
+                        }
+                    }
+                    JOptionPane.showMessageDialog(dialog, "CSV Upload Complete!\nSuccessfully added: " + successCount + " centers.\nFailed/Skipped: " + failCount + " rows.");
+                } catch (Exception ex) {
+                    JOptionPane.showMessageDialog(dialog, "Error reading file or connecting to database: " + ex.getMessage(), "Upload Error", JOptionPane.ERROR_MESSAGE);
+                }
+            }
+        });
+
+        btnView.addActionListener(e -> {
+            try (Connection conn = DriverManager.getConnection(DB_URL, USER, PASS);
+                 Statement stmt = conn.createStatement();
+                 ResultSet rs = stmt.executeQuery("SELECT COUNT(*) as count FROM Center")) {
+                if (rs.next()) {
+                    JOptionPane.showMessageDialog(dialog, "Currently " + rs.getInt("count") + " active exam centers in the Database.");
+                }
+            } catch (SQLException ex) { ex.printStackTrace(); }
         });
 
         dialog.setLocationRelativeTo(this);
