@@ -61,10 +61,17 @@ public class AdminDashboard extends JFrame {
         resetBtn.setForeground(Color.WHITE);
         resetBtn.addActionListener(e -> resetStudentData());
 
+        JButton bulkStudentsBtn = new JButton("Demo: Bulk Students");
+        bulkStudentsBtn.setBackground(new Color(0, 100, 150));
+        bulkStudentsBtn.setForeground(Color.WHITE);
+        bulkStudentsBtn.addActionListener(e -> bulkUploadStudents());
+
         JPanel bottomPanel = new JPanel();
+        bottomPanel.setLayout(new FlowLayout());
         bottomPanel.add(refreshBtn);
         bottomPanel.add(uploadCollegesBtn);
         bottomPanel.add(uploadQuestionBtn);
+        bottomPanel.add(bulkStudentsBtn);
         bottomPanel.add(releaseResultsBtn);
         bottomPanel.add(startCounsellingBtn);
         bottomPanel.add(runAllotmentBtn);
@@ -78,6 +85,75 @@ public class AdminDashboard extends JFrame {
         add(bottomPanel, BorderLayout.SOUTH);
 
         loadData();
+    }
+
+    private void bulkUploadStudents() {
+        JFileChooser fileChooser = new JFileChooser();
+        fileChooser.setDialogTitle("Select a mock Students CSV: Name, Email, Category, Attempts, Marks");
+        if (fileChooser.showOpenDialog(this) == JFileChooser.APPROVE_OPTION) {
+            java.io.File selectedFile = fileChooser.getSelectedFile();
+            try (Connection conn = DriverManager.getConnection(DB_URL, USER, PASS);
+                 java.io.BufferedReader br = new java.io.BufferedReader(new java.io.FileReader(selectedFile))) {
+                
+                String line;
+                int successCount = 0;
+                boolean isFirstLine = true;
+                
+                conn.setAutoCommit(false);
+                try {
+                    // PreparedStatement returns generated keys to grab the student_id
+                    PreparedStatement pStudent = conn.prepareStatement("INSERT INTO Student (name, email, category, attempts) VALUES (?, ?, ?, ?)", Statement.RETURN_GENERATED_KEYS);
+                    PreparedStatement pPayment = conn.prepareStatement("INSERT INTO Payment (student_id, amount, status) VALUES (?, 1500, 'SUCCESS')");
+                    PreparedStatement pCenter = conn.prepareStatement("INSERT INTO Center_Allocation (student_id, center_id) VALUES (?, 1)");
+                    PreparedStatement pResult = conn.prepareStatement("INSERT INTO Result (student_id, marks) VALUES (?, ?)");
+
+                    while ((line = br.readLine()) != null) {
+                        String[] data = line.split(",(?=([^\"]*\"[^\"]*\")*[^\"]*$)");
+                        for (int i=0; i<data.length; i++) data[i] = data[i].trim().replaceAll("^\"|\"$", "");
+                        
+                        if (data.length < 5) continue;
+                        if (isFirstLine && (data[0].toLowerCase().contains("name") || data[1].toLowerCase().contains("email"))) {
+                            isFirstLine = false; continue; // Skip header
+                        }
+                        isFirstLine = false;
+
+                        // Insert Student
+                        pStudent.setString(1, data[0]); // name
+                        pStudent.setString(2, data[1]); // email
+                        pStudent.setString(3, data[2]); // category
+                        pStudent.setInt(4, Integer.parseInt(data[3])); // attempts
+                        pStudent.executeUpdate();
+                        
+                        ResultSet rsKey = pStudent.getGeneratedKeys();
+                        if (rsKey.next()) {
+                            int newStudentId = rsKey.getInt(1);
+                            
+                            // Complete Profile Flow
+                            pPayment.setInt(1, newStudentId);
+                            pPayment.executeUpdate();
+                            
+                            pCenter.setInt(1, newStudentId);
+                            pCenter.executeUpdate();
+                            
+                            pResult.setInt(1, newStudentId);
+                            pResult.setInt(2, Integer.parseInt(data[4]));
+                            pResult.executeUpdate();
+                            
+                            successCount++;
+                        }
+                    }
+                    conn.commit();
+                    JOptionPane.showMessageDialog(this, successCount + " students bulk imported and exams marked successfully!");
+                    loadData();
+                } catch (Exception ex) {
+                    conn.rollback();
+                    ex.printStackTrace();
+                    JOptionPane.showMessageDialog(this, "Failed processing CSV. Ensure format: Name, Email, Category, Attempts, Marks", "Error", JOptionPane.ERROR_MESSAGE);
+                }
+            } catch (Exception ex) {
+                ex.printStackTrace();
+            }
+        }
     }
 
     private void releaseResults() {
@@ -138,7 +214,7 @@ public class AdminDashboard extends JFrame {
                     stmt.executeUpdate("SET FOREIGN_KEY_CHECKS = 1");
                     
                     // Reset application flags so exams/counselling can be retaken
-                    stmt.executeUpdate("UPDATE App_Status SET results_released = false, counselling_started = false, allotment_done = false WHERE id = 1");
+                    stmt.executeUpdate("UPDATE App_Status SET results_released = false, counselling_started = false, allotment_done = false, current_round = 0 WHERE id = 1");
                     
                     conn.commit();
                     JOptionPane.showMessageDialog(this, "Master Reset successful! The application is swept clean for new candidates.");
