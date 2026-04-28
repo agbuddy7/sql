@@ -35,7 +35,6 @@ public class JeeDashboard extends JFrame {
         mainPanel.add(createCenterSelectionPanel(), "CenterSelection");
         mainPanel.add(createStatusPanel(), "Status");
         mainPanel.add(createMockExamPanel(), "MockExam");
-        mainPanel.add(createCounsellingPanel(), "Counselling");
 
         add(mainPanel);
     }
@@ -115,10 +114,6 @@ public class JeeDashboard extends JFrame {
         takeExamBtn.setForeground(Color.WHITE);
 
         JButton checkResultsBtn = new JButton("Check Results & Rank");
-        
-        JButton counsellingBtn = new JButton("Fill Counselling Choices");
-        counsellingBtn.setBackground(new Color(0, 153, 102));
-        counsellingBtn.setForeground(Color.WHITE);
 
         JButton logoutBtn = new JButton("Logout");
 
@@ -164,34 +159,6 @@ public class JeeDashboard extends JFrame {
             } catch (SQLException ex) { ex.printStackTrace(); }
         });
 
-        // Counselling logic
-        counsellingBtn.addActionListener(e -> {
-            try (Connection conn = DriverManager.getConnection(DB_URL, USER, PASS);
-                 Statement stmt = conn.createStatement()) {
-                
-                // First check if allotted
-                ResultSet rsAllot = stmt.executeQuery("SELECT c.name FROM Allotment a JOIN College c ON a.college_id = c.college_id WHERE student_id = " + currentStudentId);
-                if (rsAllot.next()) {
-                    JOptionPane.showMessageDialog(this, "🎉 CONGRATULATIONS! You have been allotted: \n" + rsAllot.getString("name"), "Allotment Result", JOptionPane.INFORMATION_MESSAGE);
-                    return;
-                }
-
-                ResultSet rsStatus = stmt.executeQuery("SELECT counselling_started, allotment_done FROM App_Status WHERE id = 1");
-                if (rsStatus.next()) {
-                    if (rsStatus.getBoolean("allotment_done")) {
-                        JOptionPane.showMessageDialog(this, "Allotment is done, but unfortunately you did not get a seat.");
-                        return;
-                    }
-                    if (rsStatus.getBoolean("counselling_started")) {
-                        loadColleges();
-                        cardLayout.show(mainPanel, "Counselling");
-                    } else {
-                        JOptionPane.showMessageDialog(this, "Counselling hasn't started yet. Wait for Admin notification.");
-                    }
-                }
-            } catch (SQLException ex) { ex.printStackTrace(); }
-        });
-
         logoutBtn.addActionListener(e -> {
             currentStudentId = -1;
             cardLayout.show(mainPanel, "Login");
@@ -200,7 +167,6 @@ public class JeeDashboard extends JFrame {
         panel.add(successLabel);
         panel.add(takeExamBtn);
         panel.add(checkResultsBtn);
-        panel.add(counsellingBtn);
         panel.add(logoutBtn);
 
         return panel;
@@ -595,87 +561,6 @@ public class JeeDashboard extends JFrame {
         });
 
         panel.add(confirmBtn);
-        return panel;
-    }
-
-    private DefaultComboBoxModel<String> collegeModel1 = new DefaultComboBoxModel<>();
-    private DefaultComboBoxModel<String> collegeModel2 = new DefaultComboBoxModel<>();
-    private DefaultComboBoxModel<String> collegeModel3 = new DefaultComboBoxModel<>();
-
-    private void loadColleges() {
-        collegeModel1.removeAllElements();
-        collegeModel2.removeAllElements();
-        collegeModel3.removeAllElements();
-        collegeModel1.addElement("None");
-        collegeModel2.addElement("None");
-        collegeModel3.addElement("None");
-        
-        try (Connection conn = DriverManager.getConnection(DB_URL, USER, PASS);
-             Statement stmt = conn.createStatement();
-             ResultSet rs = stmt.executeQuery("SELECT college_id, name, type FROM College")) {
-            
-            while (rs.next()) {
-                String c = rs.getInt("college_id") + "-" + rs.getString("name") + " (" + rs.getString("type") + ")";
-                collegeModel1.addElement(c);
-                collegeModel2.addElement(c);
-                collegeModel3.addElement(c);
-            }
-        } catch (SQLException e) { e.printStackTrace(); }
-    }
-
-    private JPanel createCounsellingPanel() {
-        JPanel panel = new JPanel(new GridLayout(5, 1, 10, 10));
-        panel.setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
-
-        panel.add(new JLabel("Select top 3 colleges in priority:", SwingConstants.CENTER));
-        
-        JComboBox<String> pref1 = new JComboBox<>(collegeModel1);
-        JComboBox<String> pref2 = new JComboBox<>(collegeModel2);
-        JComboBox<String> pref3 = new JComboBox<>(collegeModel3);
-        
-        panel.add(pref1);
-        panel.add(pref2);
-        panel.add(pref3);
-
-        JButton savePrefBtn = new JButton("Save Preferences");
-        savePrefBtn.addActionListener(e -> {
-            String[] choices = { (String)pref1.getSelectedItem(), (String)pref2.getSelectedItem(), (String)pref3.getSelectedItem() };
-            
-            try (Connection conn = DriverManager.getConnection(DB_URL, USER, PASS)) {
-                conn.setAutoCommit(false);
-                try {
-                    // Check if preferences already submitted
-                    PreparedStatement checkStmt = conn.prepareStatement("SELECT * FROM Preference WHERE student_id = ?");
-                    checkStmt.setInt(1, currentStudentId);
-                    if (checkStmt.executeQuery().next()) {
-                        JOptionPane.showMessageDialog(this, "You have already submitted preferences.");
-                        return;
-                    }
-                    
-                    // Insert
-                    String sql = "INSERT INTO Preference (student_id, college_id, pref_order) VALUES (?, ?, ?)";
-                    try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
-                        for (int i=0; i<3; i++) {
-                            if (!choices[i].equals("None")) {
-                                int qCollegeId = Integer.parseInt(choices[i].split("-")[0]);
-                                pstmt.setInt(1, currentStudentId);
-                                pstmt.setInt(2, qCollegeId);
-                                pstmt.setInt(3, i+1);
-                                pstmt.executeUpdate();
-                            }
-                        }
-                    }
-                    conn.commit();
-                    JOptionPane.showMessageDialog(this, "Preferences Saved Successfully!");
-                    cardLayout.show(mainPanel, "Status");
-                } catch (SQLException ex) {
-                    conn.rollback();
-                    ex.printStackTrace();
-                }
-            } catch (SQLException ex) { ex.printStackTrace(); }
-        });
-
-        panel.add(savePrefBtn);
         return panel;
     }
 
