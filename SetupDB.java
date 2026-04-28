@@ -84,9 +84,10 @@ public class SetupDB {
                 "id INT PRIMARY KEY," +
                 "results_released BOOLEAN," +
                 "counselling_started BOOLEAN," +
-                "allotment_done BOOLEAN" +
+                "allotment_done BOOLEAN," +
+                "current_round INT DEFAULT 0" +
             ")");
-            stmt.executeUpdate("INSERT INTO App_Status (id, results_released, counselling_started, allotment_done) VALUES (1, false, false, false)");
+            stmt.executeUpdate("INSERT INTO App_Status (id, results_released, counselling_started, allotment_done, current_round) VALUES (1, false, false, false, 0)");
 
             // 8.5 Question Bank Table
             System.out.println("Creating Question_Bank table...");
@@ -119,6 +120,12 @@ public class SetupDB {
                 "available_seats INT" +
             ")");
             // Colleges are now uploaded dynamically by Admin via CSV
+            System.out.println("Adding mock colleges...");
+            stmt.executeUpdate("INSERT INTO College (name, type, available_seats) VALUES ('IIT Bombay (CSE)', 'Govt', 2)");
+            stmt.executeUpdate("INSERT INTO College (name, type, available_seats) VALUES ('IIT Bombay (EE)', 'Govt', 2)");
+            stmt.executeUpdate("INSERT INTO College (name, type, available_seats) VALUES ('IIT Delhi (CSE)', 'Govt', 2)");
+            stmt.executeUpdate("INSERT INTO College (name, type, available_seats) VALUES ('NIT Trichy (CSE)', 'Govt', 2)");
+            stmt.executeUpdate("INSERT INTO College (name, type, available_seats) VALUES ('BITS Pilani (CSE)', 'Govt', 2)");
 
             // 10. Candidate Preferences for Counselling
             System.out.println("Creating Preference table...");
@@ -136,6 +143,8 @@ public class SetupDB {
             stmt.executeUpdate("CREATE TABLE Allotment (" +
                 "student_id INT PRIMARY KEY," +
                 "college_id INT," +
+                "status VARCHAR(20) DEFAULT 'PENDING'," +
+                "round_allotted INT DEFAULT 1," +
                 "FOREIGN KEY (student_id) REFERENCES Student(student_id) ON DELETE CASCADE," +
                 "FOREIGN KEY (college_id) REFERENCES College(college_id) ON DELETE CASCADE" +
             ")");

@@ -16,6 +16,11 @@ public class CounsellingDashboard extends JFrame {
     private DefaultComboBoxModel<String> collegeModel2 = new DefaultComboBoxModel<>();
     private DefaultComboBoxModel<String> collegeModel3 = new DefaultComboBoxModel<>();
 
+    private JLabel allotCollegeLabel = new JLabel("", SwingConstants.CENTER);
+    private JButton freezeBtn = new JButton("FREEZE (Lock Seat)");
+    private JButton floatBtn = new JButton("FLOAT (Try for better preference)");
+    private JButton slideBtn = new JButton("SLIDE (Try for another branch in same college)");
+
     public CounsellingDashboard() {
         setTitle("JEE Counselling Portal");
         setSize(400, 350);
@@ -27,6 +32,7 @@ public class CounsellingDashboard extends JFrame {
 
         mainPanel.add(createLoginPanel(), "Login");
         mainPanel.add(createCounsellingPanel(), "Counselling");
+        mainPanel.add(createAllotmentPanel(), "Allotment");
         mainPanel.add(createStatusPanel(), "Status");
 
         add(mainPanel);
@@ -90,10 +96,23 @@ public class CounsellingDashboard extends JFrame {
                                     "\nStatus: QUALIFIED for Counselling!");
                                 
                                 // Check if already allotted
-                                ResultSet rsAllot = stmt.executeQuery("SELECT c.name FROM Allotment a JOIN College c ON a.college_id = c.college_id WHERE student_id = " + currentStudentId);
+                                ResultSet rsAllot = stmt.executeQuery("SELECT a.status, c.name FROM Allotment a JOIN College c ON a.college_id = c.college_id WHERE student_id = " + currentStudentId);
                                 if (rsAllot.next()) {
-                                    JOptionPane.showMessageDialog(this, "CONGRATULATIONS! You have been allotted: \n" + rsAllot.getString("name"), "Allotment Result", JOptionPane.INFORMATION_MESSAGE);
-                                    cardLayout.show(mainPanel, "Status");
+                                    String curStatus = rsAllot.getString("status");
+                                    allotCollegeLabel.setText(rsAllot.getString("name") + " [" + curStatus + "]");
+
+                                    if ("FREEZE".equals(curStatus)) {
+                                        freezeBtn.setEnabled(false);
+                                        floatBtn.setEnabled(false);
+                                        slideBtn.setEnabled(false);
+                                    } else {
+                                        freezeBtn.setEnabled(true);
+                                        floatBtn.setEnabled(true);
+                                        slideBtn.setEnabled(true);
+                                    }
+
+                                    JOptionPane.showMessageDialog(this, "Seat allotted! Please select your preference.", "Allotment Result", JOptionPane.INFORMATION_MESSAGE);
+                                    cardLayout.show(mainPanel, "Allotment");
                                     return;
                                 }
 
@@ -141,6 +160,67 @@ public class CounsellingDashboard extends JFrame {
             cardLayout.show(mainPanel, "Login");
         });
         panel.add(logoutBtn, BorderLayout.SOUTH);
+        return panel;
+    }
+
+    private JPanel createAllotmentPanel() {
+        JPanel panel = new JPanel(new GridLayout(6, 1, 10, 10));
+        panel.setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
+
+        JLabel titleLabel = new JLabel("Counselling Allotment Result", SwingConstants.CENTER);
+        titleLabel.setFont(new Font("Arial", Font.BOLD, 18));
+        panel.add(titleLabel);
+
+        allotCollegeLabel.setFont(new Font("Arial", Font.BOLD, 14));
+        allotCollegeLabel.setForeground(new Color(0, 100, 0));
+        panel.add(allotCollegeLabel);
+
+        JLabel infoLabel = new JLabel("Please select an option for your seat:", SwingConstants.CENTER);
+        panel.add(infoLabel);
+
+        freezeBtn.setBackground(new Color(50, 200, 50));
+        freezeBtn.setForeground(Color.WHITE);
+        floatBtn.setBackground(new Color(50, 150, 200));
+        floatBtn.setForeground(Color.WHITE);
+        slideBtn.setBackground(new Color(200, 150, 50));
+        slideBtn.setForeground(Color.WHITE);
+
+        java.awt.event.ActionListener actionListener = e -> {
+            String choice = "";
+            if (e.getSource() == freezeBtn) choice = "FREEZE";
+            else if (e.getSource() == floatBtn) choice = "FLOAT";
+            else if (e.getSource() == slideBtn) choice = "SLIDE";
+
+            try (Connection conn = DriverManager.getConnection(DB_URL, USER, PASS);
+                 PreparedStatement pstmt = conn.prepareStatement("UPDATE Allotment SET status = ? WHERE student_id = ?")) {
+                pstmt.setString(1, choice);
+                pstmt.setInt(2, currentStudentId);
+                pstmt.executeUpdate();
+                JOptionPane.showMessageDialog(this, "Seat " + choice + " successfully registered!");
+                cardLayout.show(mainPanel, "Status");
+            } catch (SQLException ex) {
+                ex.printStackTrace();
+                JOptionPane.showMessageDialog(this, "Error saving choice.");
+            }
+        };
+
+        freezeBtn.addActionListener(actionListener);
+        floatBtn.addActionListener(actionListener);
+        slideBtn.addActionListener(actionListener);
+
+        JPanel btnPanel = new JPanel(new GridLayout(1, 3, 5, 5));
+        btnPanel.add(freezeBtn);
+        btnPanel.add(floatBtn);
+        btnPanel.add(slideBtn);
+        panel.add(btnPanel);
+
+        JButton logoutBtn = new JButton("Logout");
+        logoutBtn.addActionListener(e -> {
+            currentStudentId = -1;
+            cardLayout.show(mainPanel, "Login");
+        });
+        panel.add(logoutBtn);
+
         return panel;
     }
 

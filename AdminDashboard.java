@@ -21,7 +21,7 @@ public class AdminDashboard extends JFrame {
 
 
         tableModel = new DefaultTableModel(new String[]{
-            "Student ID", "Full Name", "Email Address", "Category", "Attempts", "Payment Status", "Amount (₹)", "Exam Center", "Marks", "Rank", "Allotted College"
+            "Student ID", "Full Name", "Email Address", "Category", "Attempts", "Payment Status", "Amount (₹)", "Exam Center", "Marks", "Rank", "Allotted College", "Allotment Status"
         }, 0);
         table = new JTable(tableModel);
         table.setFillsViewportHeight(true);
@@ -422,7 +422,8 @@ public class AdminDashboard extends JFrame {
                      "COALESCE(c.city_name, 'Not Selected') as center, " +
                      "COALESCE(CAST(r.marks AS CHAR), 'N/A') as marks, " +
                      "COALESCE(CAST(r.exam_rank AS CHAR), 'N/A') as exam_rank, " +
-                     "COALESCE(col.name, 'Not Allotted') as allotted_college " +
+                     "COALESCE(col.name, 'Not Allotted') as allotted_college, " +
+                     "COALESCE(a.status, 'N/A') as allotment_status " +
                      "FROM Student s " +
                      "LEFT JOIN Payment p ON s.student_id = p.student_id " +
                      "LEFT JOIN Center_Allocation ca ON s.student_id = ca.student_id " +
@@ -448,7 +449,8 @@ public class AdminDashboard extends JFrame {
                     rs.getString("center"),
                     rs.getString("marks"),
                     rs.getString("exam_rank"),
-                    rs.getString("allotted_college")
+                    rs.getString("allotted_college"),
+                    rs.getString("allotment_status")
                 });
             }
         } catch (SQLException e) {
@@ -471,35 +473,84 @@ public class AdminDashboard extends JFrame {
     private void runAllotment() {
         try (Connection conn = DriverManager.getConnection(DB_URL, USER, PASS);
              Statement stmt = conn.createStatement()) {
-            
-            // Seat Allocation Algorithm based on Ranks + Preferences
-            String sql = "SELECT s.student_id, r.exam_rank FROM Student s " +
-                         "JOIN Result r ON s.student_id = r.student_id " +
-                         "ORDER BY r.exam_rank ASC";
 
             conn.setAutoCommit(false);
             try {
+                // Multi-round checker
+                ResultSet rsStatus = stmt.executeQuery("SELECT current_round FROM App_Status WHERE id = 1");
+                int currentRound = 0;
+                if (rsStatus.next()) currentRound = rsStatus.getInt("current_round");
+                if (currentRound >= 3) {
+                    JOptionPane.showMessageDialog(this, "All 3 Rounds of Counselling are already completed!");
+                    return;
+                }
+                currentRound++;
+
+                // Rank based allotment query
+                String sql = "SELECT s.student_id, r.exam_rank FROM Student s " +
+                             "JOIN Result r ON s.student_id = r.student_id " +
+                             "ORDER BY r.exam_rank ASC";
+
                 ResultSet rs = stmt.executeQuery(sql);
                 while (rs.next()) {
                     int studentId = rs.getInt("student_id");
                     
-                    // Get preferences for this student
-                    try (PreparedStatement prefStmt = conn.prepareStatement("SELECT college_id FROM Preference WHERE student_id = ? ORDER BY pref_order ASC")) {
+                    // Check if already allotted and their status
+                    boolean alreadyFrozen = false;
+                    int currentPrefOrder = 999;
+                    int currentAllottedCollege = -1;
+
+                    try (PreparedStatement checkAllot = conn.prepareStatement("SELECT a.college_id, a.status, p.pref_order FROM Allotment a JOIN Preference p ON a.student_id = p.student_id AND a.college_id = p.college_id WHERE a.student_id = ?")) {
+                        checkAllot.setInt(1, studentId);
+                        ResultSet allotRs = checkAllot.executeQuery();
+                        if (allotRs.next()) {
+                            String allotStatus = allotRs.getString("status");
+                            if ("FREEZE".equals(allotStatus)) {
+                                alreadyFrozen = true;
+                            } else { // FLOAT or SLIDE or PENDING
+                                currentPrefOrder = allotRs.getInt("pref_order");
+                                currentAllottedCollege = allotRs.getInt("college_id");
+                            }
+                        }
+                    }
+
+                    if (alreadyFrozen) continue; // Skip frozen students
+                    
+                    // Get preferences for this student looking for upgrades
+                    try (PreparedStatement prefStmt = conn.prepareStatement("SELECT college_id, pref_order FROM Preference WHERE student_id = ? ORDER BY pref_order ASC")) {
                         prefStmt.setInt(1, studentId);
                         ResultSet prefRs = prefStmt.executeQuery();
                         
                         while (prefRs.next()) {
                             int collegeId = prefRs.getInt("college_id");
+                            int order = prefRs.getInt("pref_order");
+                            
+                            // We only evaluate preferences better than what they already hold
+                            if (order >= currentPrefOrder) break;
                             
                             // Check available seats in college
                             try (PreparedStatement seatStmt = conn.prepareStatement("SELECT available_seats FROM College WHERE college_id = ? FOR UPDATE")) {
                                 seatStmt.setInt(1, collegeId);
                                 ResultSet seatRs = seatStmt.executeQuery();
                                 if (seatRs.next() && seatRs.getInt("available_seats") > 0) {
+                                    
+                                    // If upgrading, release old seat
+                                    if (currentAllottedCollege != -1) {
+                                        try (PreparedStatement releaseStmt = conn.prepareStatement("UPDATE College SET available_seats = available_seats + 1 WHERE college_id = ?")) {
+                                            releaseStmt.setInt(1, currentAllottedCollege);
+                                            releaseStmt.executeUpdate();
+                                        }
+                                        try (PreparedStatement delStmt = conn.prepareStatement("DELETE FROM Allotment WHERE student_id = ?")) {
+                                            delStmt.setInt(1, studentId);
+                                            delStmt.executeUpdate();
+                                        }
+                                    }
+
                                     // Allocate this college
-                                    try (PreparedStatement allotStmt = conn.prepareStatement("INSERT INTO Allotment (student_id, college_id) VALUES (?, ?)")) {
+                                    try (PreparedStatement allotStmt = conn.prepareStatement("INSERT INTO Allotment (student_id, college_id, status, round_allotted) VALUES (?, ?, 'PENDING', ?)")) {
                                         allotStmt.setInt(1, studentId);
                                         allotStmt.setInt(2, collegeId);
+                                        allotStmt.setInt(3, currentRound);
                                         allotStmt.executeUpdate();
                                     }
                                     // Drop available seat
@@ -507,17 +558,17 @@ public class AdminDashboard extends JFrame {
                                         dropSeatStmt.setInt(1, collegeId);
                                         dropSeatStmt.executeUpdate();
                                     }
-                                    break; // Break since allotted to stop checking more preferences
+                                    break; // Successfully upgraded/allotted
                                 }
                             }
                         }
                     }
                 }
                 
-                stmt.executeUpdate("UPDATE App_Status SET allotment_done = true WHERE id = 1");
+                stmt.executeUpdate("UPDATE App_Status SET allotment_done = true, current_round = " + currentRound + " WHERE id = 1");
                 conn.commit();
-                JOptionPane.showMessageDialog(this, "Allotment simulation ran successfully! Seats have been assigned based on merit & preference.");
-                loadData(); // To refresh table (if college column is added)
+                JOptionPane.showMessageDialog(this, "Round " + currentRound + " Allotment ran successfully!");
+                loadData(); 
             } catch (SQLException ex) {
                 conn.rollback();
                 ex.printStackTrace();
